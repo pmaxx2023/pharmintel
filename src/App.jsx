@@ -534,7 +534,10 @@ export default function PharmIntel() {
             </div>
           )}
           {fmt === "news" && intel.length > 0 && (<div style={{ animation: "fadeIn 0.3s ease" }}>
-            {topline && <p style={{ fontSize: "15px", color: "var(--t2)", lineHeight: 1.6, marginBottom: "24px", paddingBottom: "20px", borderBottom: "1px solid var(--border)", maxWidth: "600px" }}>{topline}</p>}
+            {topline && <div style={{ marginBottom: "24px", paddingBottom: "20px", borderBottom: "1px solid var(--border)", maxWidth: "600px" }}>
+              <span style={{ fontSize: "10px", fontFamily: "var(--mono)", color: "var(--gold)", letterSpacing: "0.12em", display: "block", marginBottom: "6px" }}>THE HEADLINE</span>
+              <p style={{ fontSize: "15px", color: "var(--t1)", lineHeight: 1.6, margin: 0 }}>{topline}</p>
+            </div>}
             <div style={{ marginBottom: "20px" }}>
               <span style={{ fontSize: "10px", fontFamily: "var(--mono)", color: "var(--t4)", letterSpacing: "0.12em" }}>{showAll ? intel.length : Math.min(3, intel.length)} OF {intel.length}</span>
             </div>
