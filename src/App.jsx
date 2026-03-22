@@ -88,12 +88,26 @@ function wrds(t) { return new Set(norm(t).split(/\s+/).filter(w => w.length > 2)
 function sim(a, b) { const wa = wrds(a), wb = wrds(b); if (!wa.size || !wb.size) return norm(a) === norm(b); let n = 0; for (const w of wa) if (wb.has(w)) n++; return (n / new Set([...wa, ...wb]).size) > 0.6; }
 function dd(ex, items) { const r = []; for (const i of items) if (!ex.some(e => sim(e.title, i.title)) && !r.some(x => sim(x.title, i.title))) r.push(i); return r; }
 
-async function api(sys, msg) {
-  const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ system: sys, message: msg }) });
-  const d = await res.json();
-  if (d.error) throw new Error(d.error);
-  return (d.text || "").replace(/<\/?antml:[^>]*>/g, "").replace(/<\/?cite[^>]*>/g, "").replace(/\[?\d+-\d+(?::\d+)?(?:,\d+-\d+(?::\d+)?)*\]?/g, "");
+const wait = ms => new Promise(r => setTimeout(r, ms));
+async function api(sys, msg, opts = {}) {
+  const maxRetries = 3;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ system: sys, message: msg, model: opts.model, max_tokens: opts.maxTokens }) });
+    const d = await res.json();
+    // Retry on rate limit
+    if (d.status === 429 || (d.error && d.error.includes("rate limit"))) {
+      if (attempt < maxRetries) {
+        const delay = Math.pow(2, attempt + 1) * 15000; // 30s, 60s, 120s
+        console.log(`Rate limited, retrying in ${delay/1000}s...`);
+        await wait(delay);
+        continue;
+      }
+    }
+    if (d.error) throw new Error(d.error);
+    return (d.text || "").replace(/<\/?antml:[^>]*>/g, "").replace(/<\/?cite[^>]*>/g, "").replace(/\[?\d+-\d+(?::\d+)?(?:,\d+-\d+(?::\d+)?)*\]?/g, "");
+  }
+  throw new Error("Rate limited. Try again in a minute.");
 }
 function pj(t) { try { const c = t.replace(/```json|```/g, "").trim(); const m = c.match(/\[[\s\S]*\]/); return m ? JSON.parse(m[0]) : JSON.parse(c); } catch { return []; } }
 
@@ -328,8 +342,9 @@ export default function PharmIntel() {
     const topic = currentLens?.label || ""; const ab = topic ? ` about "${topic}"` : "";
     const sa = topic || "pharmaceutical distribution, pharmacy business";
     const collected = [];
-    for (let i = 0; i < VOICES_LIST.length; i += 3) {
-      const batch = VOICES_LIST.slice(i, i + 3);
+    for (let i = 0; i < VOICES_LIST.length; i += 2) {
+      if (i > 0) await wait(20000); // 20s between batches to respect rate limits
+      const batch = VOICES_LIST.slice(i, i + 2);
       const results = await Promise.allSettled(batch.map(async v => {
         const t = await api(NEWS_SYS + `\nReturn JSON array 1-3 by ${v.name} (${v.title})${ab}: "quote","context","url","date". If none, []. ONLY valid JSON.`,
           `Recent public statements by ${v.name}, ${v.title}, about ${sa}. ONLY last 90 days.`);
@@ -426,53 +441,27 @@ export default function PharmIntel() {
     return null;
   }, []);
 
-  // ── Pre-warm on mount ──
+  // ── Pre-warm on mount (conservative — respects rate limits) ──
   const [warmed, setWarmed] = useState(false);
   useEffect(() => {
     if (warmed) return;
     setWarmed(true);
     (async () => {
-      await new Promise(r => setTimeout(r, 800));
-
-      // 1. Load cached index
+      // Load cached index immediately (no API call)
       const cachedIdx = await ST.get("tidx");
       if (cachedIdx?.data && Object.keys(cachedIdx.data).length > 0) {
         setTopicIdx(cachedIdx.data);
       }
 
-      // 2. Warm Today
-      const todayCache = await cacheGet("today", null);
-      if (!todayCache?.fresh) {
-        try {
-          const result = await fetchNews(null, 3);
-          if (result) cacheSet("today", null, { topline: result.topline, items: result.items });
-        } catch {}
-      }
-
-      // 3. Rebuild index if stale (>4h) — one call covers all 12 topics
+      // Only rebuild index if stale — one API call covers all 12 topics
+      // Wait 5s to let user interact first, avoids competing with their clicks
       if (!cachedIdx?.ts || (Date.now() - cachedIdx.ts) > CACHE_TTL) {
-        await buildIndex();
+        await wait(5000);
+        try { await buildIndex(); } catch {}
       }
-
-      // 4. Warm recent voice lenses from journal
-      const jl = await ST.get("jl");
-      if (!Array.isArray(jl)) return;
-      const seen = new Set();
-      for (const e of jl) {
-        if (e.lens && e.type === "voices" && !seen.has(e.lens) && seen.size < 3) {
-          seen.add(e.lens);
-          await new Promise(r => setTimeout(r, 800));
-          const vc = await cacheGet("voices", e.lens);
-          if (!vc?.fresh) {
-            try {
-              const collected = await fetchVoices({ type: "topic", label: e.lens, q: e.lens });
-              if (collected.length) cacheSet("voices", e.lens, { voices: collected });
-            } catch {}
-          }
-        }
-      }
+      // Today and Voices warm on demand via cache — no prewarm needed
     })();
-  }, [warmed, fetchNews, fetchVoices, buildIndex]);
+  }, [warmed, buildIndex]);
 
   const vis = showAll ? intel : intel.slice(0, 3);
   const extra = intel.length - 3;
