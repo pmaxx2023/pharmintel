@@ -441,27 +441,25 @@ export default function PharmIntel() {
     return null;
   }, []);
 
-  // ── Pre-warm on mount (conservative — respects rate limits) ──
+  // ── Pre-warm on mount (API calls disabled — uncomment when rate limit upgraded) ──
   const [warmed, setWarmed] = useState(false);
   useEffect(() => {
     if (warmed) return;
     setWarmed(true);
     (async () => {
-      // Load cached index immediately (no API call)
+      // Load cached index from localStorage (no API call)
       const cachedIdx = await ST.get("tidx");
       if (cachedIdx?.data && Object.keys(cachedIdx.data).length > 0) {
         setTopicIdx(cachedIdx.data);
       }
-
-      // Only rebuild index if stale — one API call covers all 12 topics
-      // Wait 5s to let user interact first, avoids competing with their clicks
-      if (!cachedIdx?.ts || (Date.now() - cachedIdx.ts) > CACHE_TTL) {
-        await wait(5000);
-        try { await buildIndex(); } catch {}
-      }
-      // Today and Voices warm on demand via cache — no prewarm needed
+      // PREWARM DISABLED — rate limit too low (30K tokens/min)
+      // To re-enable: upgrade API tier or use a second API key for background tasks
+      // if (!cachedIdx?.ts || (Date.now() - cachedIdx.ts) > CACHE_TTL) {
+      //   await wait(5000);
+      //   try { await buildIndex(); } catch {}
+      // }
     })();
-  }, [warmed, buildIndex]);
+  }, [warmed]);
 
   const vis = showAll ? intel : intel.slice(0, 3);
   const extra = intel.length - 3;
