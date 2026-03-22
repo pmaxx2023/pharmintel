@@ -89,19 +89,18 @@ function sim(a, b) { const wa = wrds(a), wb = wrds(b); if (!wa.size || !wb.size)
 function dd(ex, items) { const r = []; for (const i of items) if (!ex.some(e => sim(e.title, i.title)) && !r.some(x => sim(x.title, i.title))) r.push(i); return r; }
 
 const wait = ms => new Promise(r => setTimeout(r, ms));
-const FAST = "claude-haiku-4-5-20251001"; // Cheaper, lower token cost against rate limit
-const SMART = "claude-sonnet-4-20250514"; // Better quality for focused queries
+const FAST = "claude-haiku-4-5-20251001";
+const SMART = "claude-sonnet-4-20250514";
 async function api(sys, msg, opts = {}) {
-  const model = opts.model || SMART;
+  const model = opts.model || FAST; // Default Haiku to stay within rate limits
   const maxRetries = 3;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ system: sys, message: msg, model, max_tokens: opts.maxTokens || 4000 }) });
+      body: JSON.stringify({ system: sys, message: msg, model, max_tokens: opts.maxTokens || 2000 }) });
     const d = await res.json();
     if (d.status === 429 || (d.error && d.error.includes("rate limit"))) {
       if (attempt < maxRetries) {
         const delay = Math.pow(2, attempt + 1) * 15000;
-        console.log(`Rate limited, retrying in ${delay/1000}s...`);
         await wait(delay);
         continue;
       }
@@ -109,14 +108,13 @@ async function api(sys, msg, opts = {}) {
     if (d.error) throw new Error(d.error);
     return (d.text || "").replace(/<\/?antml:[^>]*>/g, "").replace(/<\/?cite[^>]*>/g, "").replace(/\[?\d+-\d+(?::\d+)?(?:,\d+-\d+(?::\d+)?)*\]?/g, "");
   }
-  throw new Error("Rate limited. Try again in a minute.");
+  throw new Error("Rate limited. Wait 60 seconds and try again.");
 }
 function pj(t) { try { const c = t.replace(/```json|```/g, "").trim(); const m = c.match(/\[[\s\S]*\]/); return m ? JSON.parse(m[0]) : JSON.parse(c); } catch { return []; } }
 
-const NEWS_SYS = `You are a pharmaceutical distribution news wire. Report ONLY verifiable facts with sources. No analysis, no opinion, no implications. If you cannot cite a source, do not include it.
-Today: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}. ONLY last 90 days. Every claim must be attributable to a named publication or public statement.`;
-const EDU_SYS = `You are a pharmaceutical distribution reference guide. Explain how things work with cited sources. No analysis, no opinion, no strategic advice. Stick to documented facts, published processes, and verifiable information.`;
-const SCH = `"title"(max 12 words, factual),"source"(publication name),"sourceId"(drugchannels|drugstorenews|pharmacytimes|pharmcommerce|chaindrugreview|rxinsider|general),"summary"(2-3 factual sentences with source attribution),"url"(https://),"date"(YYYY-MM-DD or ""),"tag"(COMPETITIVE|REGULATORY|MARKET|CUSTOMER|TECHNOLOGY|FINANCIAL)`;
+const NEWS_SYS = `Pharma distribution news wire. Facts only, cite sources. Today: ${new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}. Last 90 days only.`;
+const EDU_SYS = `Pharma distribution reference. Explain with cited sources. No opinion.`;
+const SCH = `"title","source","sourceId"(drugchannels|drugstorenews|pharmacytimes|pharmcommerce|chaindrugreview|rxinsider|general),"summary"(1-2 sentences),"url","date"(YYYY-MM-DD),"tag"(COMPETITIVE|REGULATORY|MARKET|CUSTOMER|TECHNOLOGY|FINANCIAL)`;
 
 const fmtDate = (d) => {
   if (!d || d.trim() === "") return null;
@@ -132,10 +130,9 @@ const ago = (iso) => { if (!iso) return null; const d = Math.floor((Date.now() -
 function sysFor(lens) {
   if (!lens) return NEWS_SYS;
   if (lens.type === "workflow") return EDU_SYS;
-  if (lens.type === "segment" || lens.type === "account") return `You are a pharmaceutical distribution reference tool focused on "${lens.label}". Report ONLY verifiable facts with sources. No analysis, no opinion.`;
-  return NEWS_SYS;
+  return `Pharma distribution facts about "${lens.label}". Cite sources. No opinion.`;
 }
-const lensCtx = l => l ? `about "${l.label}" (${l.q})` : "across pharmaceutical distribution, pharmacy business, McKesson, Cardinal Health, Cencora, regulation";
+const lensCtx = l => l ? `"${l.label}"` : "pharma distribution";
 
 // ── Components ──
 const Progress = ({ msg }) => {
@@ -291,9 +288,9 @@ export default function PharmIntel() {
 
   // ── Run: News (cache-first) ──
   const fetchNews = useCallback(async (currentLens, limit) => {
-    const count = limit || "6-8";
-    const t = await api(sysFor(currentLens) + `\nReturn JSON: {"topline":"one factual sentence summarizing the current state, cite a source","items":[${limit ? `exactly ${limit}` : count} objects: ${SCH}]}. ${limit ? "Rank by impact." : ""} Facts only. ONLY valid JSON.`,
-      `${limit ? `${limit} most important things` : "Latest factual news"} ${lensCtx(currentLens)}. ONLY last 90 days. No 2024. Cite sources. URLs.`);
+    const count = limit || "3-4";
+    const t = await api(sysFor(currentLens) + `\nJSON: {"topline":"1 sentence","items":[${count}: ${SCH}]}. Only JSON.`,
+      `${limit ? "Top " + limit : "News"} ${lensCtx(currentLens)}. Last 90 days. URLs.`);
     try {
       const obj = JSON.parse(t.replace(/```json|```/g, "").trim().match(/\{[\s\S]*\}/)?.[0] || "{}");
       if (obj.topline && obj.items?.length) return { topline: obj.topline, items: obj.items };
@@ -337,13 +334,12 @@ export default function PharmIntel() {
     const topic = currentLens?.label || ""; const ab = topic ? ` about "${topic}"` : "";
     const sa = topic || "pharmaceutical distribution, pharmacy business";
     const collected = [];
-    for (let i = 0; i < VOICES_LIST.length; i += 2) {
-      if (i > 0) await wait(20000); // 20s between batches to respect rate limits
-      const batch = VOICES_LIST.slice(i, i + 2);
+    for (let i = 0; i < Math.min(5, VOICES_LIST.length); i++) {
+      if (i > 0) await wait(15000); // 15s between calls
+      const batch = [VOICES_LIST[i]];
       const results = await Promise.allSettled(batch.map(async v => {
-        const t = await api(NEWS_SYS + `\nReturn JSON array 1-3 by ${v.name} (${v.title})${ab}: "quote","context","url","date". If none, []. ONLY valid JSON.`,
-          `Recent public statements by ${v.name}, ${v.title}, about ${sa}. ONLY last 90 days.`,
-          { model: FAST });
+        const t = await api(NEWS_SYS + `\nJSON array 1-2 by ${v.name}${ab}: "quote","context","url","date". If none, []. Only JSON.`,
+          `Statements by ${v.name} about ${sa}. Last 90 days.`);
         return { voice: v, stmts: pj(t) };
       }));
       for (const r of results) if (r.status === "fulfilled" && r.value.stmts.length)
@@ -394,7 +390,7 @@ export default function PharmIntel() {
     setLoading(true); setErr(null); setIntel([]); setTopline(""); setShowAll(false); setFmt("news");
     const iv = sL("news");
     try {
-      const t = await api(NEWS_SYS + `\nReturn JSON: {"topline":"one factual sentence summarizing results, cite a source","items":[6-8 objects: ${SCH}]}. Facts only. ONLY valid JSON.`, `Latest factual news: ${query}\nONLY last 90 days. Cite sources. URLs.`);
+      const t = await api(NEWS_SYS + `\nJSON: {"topline":"1 sentence","items":[3-4: ${SCH}]}. Only JSON.`, `News: ${query}. Last 90 days. URLs.`);
       try {
         const obj = JSON.parse(t.replace(/```json|```/g, "").trim().match(/\{[\s\S]*\}/)?.[0] || "{}");
         if (obj.topline && obj.items?.length) { setTopline(obj.topline); setIntel(obj.items); setAllIntel(prev => [...prev, ...dd(prev, obj.items)]); logJ("search", query, obj.topline, obj.items); clearInterval(iv); setLoading(false); return; }
