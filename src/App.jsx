@@ -219,7 +219,6 @@ export default function PharmIntel() {
   const [copied, setCopied] = useState(false);
   const [navOpen, setNavOpen] = useState(true);
   const [journal, setJournal] = useState([]);
-  const [topicIdx, setTopicIdx] = useState({}); // { "Cardinal Health": [{title,source,date,url,tag},...], ... }
   const addRef = useRef(null);
 
   useEffect(() => { if (showAdd && addRef.current) addRef.current.focus(); }, [showAdd]);
@@ -230,7 +229,6 @@ export default function PharmIntel() {
       const rd = await ST.get("rd"); if (rd?.length) setReadSet(new Set(rd));
       const lv = await ST.get("lv"); if (lv) setLastVisit(lv);
       const jl = await ST.get("jl"); if (Array.isArray(jl) && jl.length) setJournal(jl);
-      const ti = await ST.get("tidx"); if (ti?.data && Object.keys(ti.data).length) setTopicIdx(ti.data);
     } catch (e) { console.error("Storage load error:", e); }
   })(); }, []);
 
@@ -309,22 +307,17 @@ export default function PharmIntel() {
     const ck = limit ? "today" : "news";
     const lensLabel = currentLens?.label || null;
 
-    // 1. Check per-topic cache
+    // 1. Check cache
     const cached = await cacheGet(ck, lensLabel);
     if (cached?.items?.length) {
       setTopline(cached.topline || ""); setIntel(cached.items);
       if (cached.fresh) { return; }
       setRefreshing(true);
-    }
-    // 2. Check topic index for instant preview (if no cache hit)
-    else if (!limit && lensLabel && topicIdx[lensLabel]?.length) {
-      setIntel(topicIdx[lensLabel]); setTopline("");
-      setRefreshing(true); // show index results, fetch full in background
     } else {
       setIntel([]); setTopline(""); setLoading(true);
     }
 
-    // 3. Fetch full results
+    // 2. Fetch full results
     const iv = sL(ck);
     try {
       const result = await fetchNews(currentLens, limit);
@@ -334,10 +327,10 @@ export default function PharmIntel() {
         logJ(ck, lensLabel, result.topline, result.items);
         cacheSet(ck, lensLabel, { topline: result.topline, items: result.items });
         const now = new Date().toISOString(); setLastVisit(now); ST.set("lv", now);
-      } else if (!cached?.items?.length && !(topicIdx[lensLabel]?.length)) setErr("No results.");
-    } catch (e) { if (!cached?.items?.length && !(topicIdx[lensLabel]?.length)) setErr(e.message); }
+      } else if (!cached?.items?.length) setErr("No results.");
+    } catch (e) { if (!cached?.items?.length) setErr(e.message); }
     clearInterval(iv); setLoading(false); setRefreshing(false);
-  }, [topicIdx]);
+  }, []);
 
   // ── Run: Voices (cache-first) ──
   const fetchVoices = useCallback(async (currentLens) => {
@@ -419,51 +412,7 @@ export default function PharmIntel() {
   };
 
   // ── Topic Index: one API call indexes all topics ──
-  const buildIndex = useCallback(async () => {
-    const topicLabels = TOPICS.map(t => t.label).join(", ");
-    try {
-      const t = await api(
-        NEWS_SYS + `\nReturn JSON object where each key is a topic name and the value is an array of 2-3 items: ${SCH}. Topics: ${topicLabels}. ONLY valid JSON. No markdown.`,
-        `For EACH of these topics, find 2-3 recent factual headlines with sources: ${topicLabels}. ONLY last 90 days. Include URLs. Return as {"Topic Name": [{item}, ...], ...}`,
-        { model: FAST }
-      );
-      try {
-        const obj = JSON.parse(t.replace(/```json|```/g, "").trim().match(/\{[\s\S]*\}/)?.[0] || "{}");
-        if (Object.keys(obj).length > 0) {
-          setTopicIdx(obj);
-          ST.set("tidx", { data: obj, ts: Date.now() });
-          // Also populate per-topic caches
-          for (const [label, items] of Object.entries(obj)) {
-            if (Array.isArray(items) && items.length) {
-              cacheSet("news", label, { topline: "", items });
-            }
-          }
-          return obj;
-        }
-      } catch {}
-    } catch {}
-    return null;
-  }, []);
-
-  // ── Pre-warm on mount (API calls disabled — uncomment when rate limit upgraded) ──
-  const [warmed, setWarmed] = useState(false);
-  useEffect(() => {
-    if (warmed) return;
-    setWarmed(true);
-    (async () => {
-      // Load cached index from localStorage (no API call)
-      const cachedIdx = await ST.get("tidx");
-      if (cachedIdx?.data && Object.keys(cachedIdx.data).length > 0) {
-        setTopicIdx(cachedIdx.data);
-      }
-      // PREWARM DISABLED — rate limit too low (30K tokens/min)
-      // To re-enable: upgrade API tier or use a second API key for background tasks
-      // if (!cachedIdx?.ts || (Date.now() - cachedIdx.ts) > CACHE_TTL) {
-      //   await wait(5000);
-      //   try { await buildIndex(); } catch {}
-      // }
-    })();
-  }, [warmed]);
+  /* buildIndex and prewarm removed — re-add when rate limit upgraded */
 
   const vis = showAll ? intel : intel.slice(0, 3);
   const extra = intel.length - 3;
