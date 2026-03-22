@@ -25,18 +25,18 @@ const TOPICS = [
   { label: "Strategic Accounts", q: "pharmacy wholesale strategic accounts management" },
 ];
 const WORKFLOWS = [
-  { label: "Ordering", q: "pharmacy wholesale drug ordering platform ecommerce" },
-  { label: "Returns", q: "pharmacy drug returns reverse distribution process" },
-  { label: "Chargebacks", q: "pharmaceutical chargeback wholesale manufacturer pricing dispute" },
-  { label: "Inventory Mgmt", q: "pharmacy inventory management par levels automation" },
-  { label: "Contract Pricing", q: "pharmacy GPO contract pricing wholesale drug cost" },
-  { label: "Invoice & AP", q: "pharmacy accounts payable wholesale invoice payment terms" },
-  { label: "Backorders", q: "pharmacy drug backorder allocation shortage management" },
-  { label: "Controlled Substances", q: "pharmacy controlled substance CSOS DEA ordering" },
-  { label: "Drop Ship", q: "pharmacy drop ship direct from manufacturer distribution" },
-  { label: "Formulary Mgmt", q: "pharmacy formulary management therapeutic interchange" },
-  { label: "Rebates", q: "pharmaceutical manufacturer rebate wholesale pharmacy" },
-  { label: "EDI Integration", q: "pharmacy EDI electronic ordering integration wholesale" },
+  { label: "Ordering", q: "pharmacy wholesale drug ordering platform ecommerce", desc: "How pharmacies place & receive orders" },
+  { label: "Returns", q: "pharmacy drug returns reverse distribution process", desc: "Expired, damaged, recalled product" },
+  { label: "Chargebacks", q: "pharmaceutical chargeback wholesale manufacturer pricing dispute", desc: "Contract price disputes with mfrs" },
+  { label: "Inventory Mgmt", q: "pharmacy inventory management par levels automation", desc: "Par levels, cycle counts, shrinkage" },
+  { label: "Contract Pricing", q: "pharmacy GPO contract pricing wholesale drug cost", desc: "GPO contracts, WAC, cost-plus" },
+  { label: "Invoice & AP", q: "pharmacy accounts payable wholesale invoice payment terms", desc: "Payment terms, credits, reconciliation" },
+  { label: "Backorders", q: "pharmacy drug backorder allocation shortage management", desc: "Allocation, substitution, comms" },
+  { label: "Controlled Substances", q: "pharmacy controlled substance CSOS DEA ordering", desc: "CSOS, DEA reporting, thresholds" },
+  { label: "Drop Ship", q: "pharmacy drop ship direct from manufacturer distribution", desc: "Direct-from-mfr fulfillment" },
+  { label: "Formulary Mgmt", q: "pharmacy formulary management therapeutic interchange", desc: "Preferred products, therapeutic subs" },
+  { label: "Rebates", q: "pharmaceutical manufacturer rebate wholesale pharmacy", desc: "Mfr rebates, compliance, tracking" },
+  { label: "EDI Integration", q: "pharmacy EDI electronic ordering integration wholesale", desc: "850/855/856/810, AS2 connections" },
 ];
 const SEGMENTS = [
   { label: "Strategic Accounts", q: "pharmacy strategic accounts large chain wholesale distribution", desc: "Large chain & regional", accounts: [
@@ -209,13 +209,14 @@ export default function PharmIntel() {
   const [vExp, setVExp] = useState(new Set());
   const [customT, setCustomT] = useState([]);
   const [showAdd, setShowAdd] = useState(false);
-  const [sTab, setSTab] = useState("topics");
+  const [sTab, setSTab] = useState("segments");
   const [segOpen, setSegOpen] = useState(null);
   const [nL, setNL] = useState("");
   const [nQu, setNQu] = useState("");
   const [copied, setCopied] = useState(false);
   const [navOpen, setNavOpen] = useState(true);
   const [journal, setJournal] = useState([]);
+  const [cachedTopics, setCachedTopics] = useState(new Set());
   const addRef = useRef(null);
 
   useEffect(() => { if (showAdd && addRef.current) addRef.current.focus(); }, [showAdd]);
@@ -228,6 +229,16 @@ export default function PharmIntel() {
       const jl = await ST.get("jl"); if (Array.isArray(jl) && jl.length) setJournal(jl);
     } catch (e) { console.error("Storage load error:", e); }
   })(); }, []);
+
+  // Check which topics have cached results (green dot indicator)
+  useEffect(() => { (async () => {
+    const hits = new Set();
+    for (const t of TOPICS) {
+      const c = await cacheGet("news", t.label);
+      if (c?.items?.length) hits.add(t.label);
+    }
+    setCachedTopics(hits);
+  })(); }, [intel]); // re-check after each fetch
 
   const allTopics = [...TOPICS.map(t => ({...t, custom: false})), ...customT.map(t => ({...t, custom: true}))].sort((a,b) => a.label.localeCompare(b.label));
   const ps = (k,v) => ST.set(k,v);
@@ -588,7 +599,7 @@ export default function PharmIntel() {
         {navOpen && (
           <aside style={{ width: "260px", flexShrink: 0, borderLeft: "1px solid var(--border)", padding: "32px 0 32px 24px", overflowY: "auto", position: "sticky", top: "52px", height: "calc(100vh - 52px)", animation: "fadeIn 0.2s" }}>
             <div style={{ display: "flex", gap: "12px", marginBottom: "16px" }}>
-              {["topics","workflow","segments"].map(t => (
+              {["segments","workflow","topics"].map(t => (
                 <button key={t} onClick={() => setSTab(t)} style={{ background: "none", border: "none", fontSize: "10px", fontFamily: "var(--mono)", letterSpacing: "0.12em", color: sTab === t ? "var(--gold)" : "var(--t4)", cursor: "pointer", padding: "0 0 4px", borderBottom: sTab === t ? "1px solid var(--gold)" : "1px solid transparent", textTransform: "uppercase" }}>{t}</button>
               ))}
             </div>
@@ -603,21 +614,24 @@ export default function PharmIntel() {
                 <button onClick={addT} disabled={!nL.trim()} style={{ background: nL.trim() ? "var(--gold)" : "var(--bg2)", color: nL.trim() ? "var(--bg)" : "var(--t4)", border: "none", padding: "4px 12px", borderRadius: "3px", fontSize: "10px", fontFamily: "var(--mono)", cursor: nL.trim() ? "pointer" : "default", width: "100%" }}>Add</button>
               </div>)}
               <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
-                {allTopics.map((t, i) => (
+                {allTopics.map((t, i) => {
+                  const isCached = cachedTopics.has(t.label);
+                  return (
                   <button key={i} onClick={() => selectLens("topic", t.label, t.q)} disabled={loading}
-                    style={{ background: lens?.label === t.label ? "rgba(201,168,76,0.12)" : "var(--bg2)", border: `1px solid ${lens?.label === t.label ? "rgba(201,168,76,0.3)" : "var(--border)"}`, borderRadius: "20px", color: lens?.label === t.label ? "var(--gold)" : "var(--t3)", padding: "4px 10px", cursor: "pointer", fontSize: "11px", fontFamily: "var(--body)", transition: "all 0.12s" }}
+                    style={{ display: "flex", alignItems: "center", gap: "4px", background: lens?.label === t.label ? "rgba(201,168,76,0.12)" : "var(--bg2)", border: `1px solid ${lens?.label === t.label ? "rgba(201,168,76,0.3)" : "var(--border)"}`, borderRadius: "20px", color: lens?.label === t.label ? "var(--gold)" : "var(--t3)", padding: "4px 10px", cursor: "pointer", fontSize: "11px", fontFamily: "var(--body)", transition: "all 0.12s" }}
                     onMouseEnter={e => { e.currentTarget.style.color = "#fff"; }} onMouseLeave={e => { e.currentTarget.style.color = lens?.label === t.label ? "var(--gold)" : "var(--t3)"; }}
-                  >{t.custom ? "★ " : ""}{t.label}</button>
-                ))}
+                  >{isCached && <span style={{ width: "4px", height: "4px", borderRadius: "50%", background: "#3DBB6E", flexShrink: 0 }} />}{t.custom ? "★ " : ""}{t.label}</button>
+                );})}
               </div>
             </div>)}
 
-            {sTab === "workflow" && (<div style={{ display: "flex", flexDirection: "column" }}>
+            {sTab === "workflow" && (<div>
               {WORKFLOWS.map((w, i) => (
                 <button key={i} onClick={() => selectLens("workflow", w.label, w.q)} disabled={loading}
-                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "none", border: "none", borderBottom: "1px solid var(--border-dim)", color: lens?.label === w.label ? "var(--blue)" : "var(--t3)", padding: "8px 0", cursor: "pointer", fontSize: "12px", fontFamily: "var(--body)", transition: "color 0.12s", fontWeight: lens?.label === w.label ? 600 : 400 }}
+                  style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: "none", borderBottom: "1px solid var(--border-dim)", color: lens?.label === w.label ? "var(--blue)" : "var(--t3)", padding: "8px 0", cursor: "pointer", fontSize: "12px", fontFamily: "var(--body)", transition: "color 0.12s", fontWeight: lens?.label === w.label ? 600 : 400 }}
                   onMouseEnter={e => e.currentTarget.style.color = "#fff"} onMouseLeave={e => e.currentTarget.style.color = lens?.label === w.label ? "var(--blue)" : "var(--t3)"}>
-                  <span>{w.label}</span><span style={{ fontSize: "10px", opacity: 0.3 }}>→</span>
+                  <span>▸ {w.label}</span>
+                  <span style={{ display: "block", fontSize: "10px", color: "var(--t4)", fontFamily: "var(--mono)", marginLeft: "10px" }}>{w.desc}</span>
                 </button>
               ))}
             </div>)}
