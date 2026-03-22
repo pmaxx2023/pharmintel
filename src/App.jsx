@@ -89,16 +89,18 @@ function sim(a, b) { const wa = wrds(a), wb = wrds(b); if (!wa.size || !wb.size)
 function dd(ex, items) { const r = []; for (const i of items) if (!ex.some(e => sim(e.title, i.title)) && !r.some(x => sim(x.title, i.title))) r.push(i); return r; }
 
 const wait = ms => new Promise(r => setTimeout(r, ms));
+const FAST = "claude-haiku-4-5-20251001"; // Cheaper, lower token cost against rate limit
+const SMART = "claude-sonnet-4-20250514"; // Better quality for focused queries
 async function api(sys, msg, opts = {}) {
+  const model = opts.model || SMART;
   const maxRetries = 3;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ system: sys, message: msg, model: opts.model, max_tokens: opts.maxTokens }) });
+      body: JSON.stringify({ system: sys, message: msg, model, max_tokens: opts.maxTokens || 4000 }) });
     const d = await res.json();
-    // Retry on rate limit
     if (d.status === 429 || (d.error && d.error.includes("rate limit"))) {
       if (attempt < maxRetries) {
-        const delay = Math.pow(2, attempt + 1) * 15000; // 30s, 60s, 120s
+        const delay = Math.pow(2, attempt + 1) * 15000;
         console.log(`Rate limited, retrying in ${delay/1000}s...`);
         await wait(delay);
         continue;
@@ -347,7 +349,8 @@ export default function PharmIntel() {
       const batch = VOICES_LIST.slice(i, i + 2);
       const results = await Promise.allSettled(batch.map(async v => {
         const t = await api(NEWS_SYS + `\nReturn JSON array 1-3 by ${v.name} (${v.title})${ab}: "quote","context","url","date". If none, []. ONLY valid JSON.`,
-          `Recent public statements by ${v.name}, ${v.title}, about ${sa}. ONLY last 90 days.`);
+          `Recent public statements by ${v.name}, ${v.title}, about ${sa}. ONLY last 90 days.`,
+          { model: FAST });
         return { voice: v, stmts: pj(t) };
       }));
       for (const r of results) if (r.status === "fulfilled" && r.value.stmts.length)
@@ -421,7 +424,8 @@ export default function PharmIntel() {
     try {
       const t = await api(
         NEWS_SYS + `\nReturn JSON object where each key is a topic name and the value is an array of 2-3 items: ${SCH}. Topics: ${topicLabels}. ONLY valid JSON. No markdown.`,
-        `For EACH of these topics, find 2-3 recent factual headlines with sources: ${topicLabels}. ONLY last 90 days. Include URLs. Return as {"Topic Name": [{item}, ...], ...}`
+        `For EACH of these topics, find 2-3 recent factual headlines with sources: ${topicLabels}. ONLY last 90 days. Include URLs. Return as {"Topic Name": [{item}, ...], ...}`,
+        { model: FAST }
       );
       try {
         const obj = JSON.parse(t.replace(/```json|```/g, "").trim().match(/\{[\s\S]*\}/)?.[0] || "{}");
