@@ -149,10 +149,31 @@ const Lnk = ({ url }) => {
 
 const Card = ({ item, onSave, saved, read, onRead, isNew }) => {
   const [open, setOpen] = useState(false);
+  const [fullText, setFullText] = useState(null);
+  const [fetching, setFetching] = useState(false);
   const src = SOURCES.find(s => s.id === item.sourceId) || SOURCES[6];
+  
+  const handleClick = async () => {
+    const willOpen = !open;
+    setOpen(willOpen);
+    if (!read && onRead) onRead(item.title);
+    // Fetch article content on first expand
+    if (willOpen && fullText === null && item.url) {
+      setFetching(true);
+      try {
+        const res = await fetch("/api/extract", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: item.url }) });
+        const d = await res.json();
+        setFullText(d.text || "");
+      } catch { setFullText(""); }
+      setFetching(false);
+    }
+  };
+  
+  const summary = fullText || item.summary;
+  
   return (
     <article style={{ paddingBottom: "24px", marginBottom: "24px", borderBottom: "1px solid var(--border)", opacity: read && !open ? 0.5 : 1, transition: "opacity 0.2s", cursor: "pointer" }}
-      onClick={() => { setOpen(!open); if (!read && onRead) onRead(item.title); }}
+      onClick={handleClick}
       onMouseEnter={e => e.currentTarget.style.opacity = "1"} onMouseLeave={e => { if (read && !open) e.currentTarget.style.opacity = "0.5"; }}>
       <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
         {item.date && fmtDate(item.date) && <span style={{ fontSize: "10px", fontFamily: "var(--mono)", color: "var(--t3)", textTransform: "uppercase", letterSpacing: "0.12em" }}>{fmtDate(item.date)}</span>}
@@ -164,7 +185,8 @@ const Card = ({ item, onSave, saved, read, onRead, isNew }) => {
       </div>
       <h3 style={{ fontSize: "17px", fontWeight: 600, color: "var(--t1)", lineHeight: 1.4, marginBottom: open ? "10px" : 0, fontFamily: "var(--body)" }}>{item.title}</h3>
       {open && (<div style={{ animation: "fadeIn 0.2s ease" }}>
-        <p style={{ fontSize: "14px", color: "var(--t2)", lineHeight: 1.7, marginBottom: "8px" }}>{item.summary}</p>
+        {fetching && <p style={{ fontSize: "12px", color: "var(--t4)", fontFamily: "var(--mono)", marginBottom: "8px" }}>Loading article...</p>}
+        <p style={{ fontSize: "14px", color: "var(--t2)", lineHeight: 1.7, marginBottom: "8px" }}>{summary}</p>
         <Lnk url={item.url} />
       </div>)}
     </article>
