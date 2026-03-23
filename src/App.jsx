@@ -150,6 +150,7 @@ const Lnk = ({ url }) => {
 const Card = ({ item, onSave, saved, read, onRead, isNew }) => {
   const [open, setOpen] = useState(false);
   const [fullText, setFullText] = useState(null);
+  const [resolvedUrl, setResolvedUrl] = useState(null);
   const [fetching, setFetching] = useState(false);
   const src = SOURCES.find(s => s.id === item.sourceId) || SOURCES[6];
   
@@ -164,12 +165,14 @@ const Card = ({ item, onSave, saved, read, onRead, isNew }) => {
         const res = await fetch("/api/extract", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: item.url }) });
         const d = await res.json();
         setFullText(d.text || "");
+        if (d.url && d.url !== item.url) setResolvedUrl(d.url);
       } catch { setFullText(""); }
       setFetching(false);
     }
   };
   
   const summary = fullText || item.summary;
+  const linkUrl = resolvedUrl || item.url;
   
   return (
     <article style={{ paddingBottom: "24px", marginBottom: "24px", borderBottom: "1px solid var(--border)", opacity: read && !open ? 0.5 : 1, transition: "opacity 0.2s", cursor: "pointer" }}
@@ -187,7 +190,7 @@ const Card = ({ item, onSave, saved, read, onRead, isNew }) => {
       {open && (<div style={{ animation: "fadeIn 0.2s ease" }}>
         {fetching && <p style={{ fontSize: "12px", color: "var(--t4)", fontFamily: "var(--mono)", marginBottom: "8px" }}>Loading article...</p>}
         <p style={{ fontSize: "14px", color: "var(--t2)", lineHeight: 1.7, marginBottom: "8px" }}>{summary}</p>
-        <Lnk url={item.url} />
+        <Lnk url={linkUrl} />
       </div>)}
     </article>
   );
