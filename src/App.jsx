@@ -107,8 +107,8 @@ async function api(sys, msg) {
 }
 function pj(t) { try { const c = t.replace(/```json|```/g, "").trim(); const m = c.match(/\[[\s\S]*\]/); return m ? JSON.parse(m[0]) : JSON.parse(c); } catch { return []; } }
 
-const SYS = `Pharma distribution news. Facts only, cite sources. Today: ${new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}. Last 90 days only.`;
-const SCH = `"title","source","sourceId"(drugchannels|drugstorenews|pharmacytimes|pharmcommerce|chaindrugreview|rxinsider|general),"summary"(2-3 sentences),"url","date"(YYYY-MM-DD),"tag"(COMPETITIVE|REGULATORY|MARKET|CUSTOMER|TECHNOLOGY|FINANCIAL)`;
+const SYS = `You are a pharma distribution news researcher. For each item you find, write a detailed 3-4 sentence summary explaining what happened, who is involved, and what changed. Never just repeat the headline. Always include specific facts, numbers, or quotes when available. Cite the publication. Today: ${new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}. Only last 90 days.`;
+const SCH = `"title"(short headline),"source"(publication name),"sourceId"(drugchannels|drugstorenews|pharmacytimes|pharmcommerce|chaindrugreview|rxinsider|general),"summary"(MUST be 3-4 detailed sentences with specific facts - NOT just the headline restated),"url"(real article URL),"date"(YYYY-MM-DD),"tag"(COMPETITIVE|REGULATORY|MARKET|CUSTOMER|TECHNOLOGY|FINANCIAL)`;
 const lensCtx = l => l ? `"${l.label}"` : "pharma distribution";
 
 const fmtDate = (d) => {
@@ -293,8 +293,8 @@ export default function PharmIntel() {
   // ── Fetch News (AI with web search) ──
   const fetchNews = useCallback(async (currentLens, limit) => {
     const count = limit || 4;
-    const t = await api(SYS + `\nJSON: {"topline":"1 factual sentence","items":[${count}: ${SCH}]}. Only JSON.`,
-      `${limit ? "Top " + limit : "News"} ${lensCtx(currentLens)}. Last 90 days. URLs.`);
+    const t = await api(SYS + `\nReturn JSON: {"topline":"1 factual sentence summarizing the most important development","items":[${count} items, each with: ${SCH}]}. Each summary MUST be 3-4 sentences with real details. Only valid JSON.`,
+      `Search for the ${limit ? limit + " most important" : "latest"} developments about ${lensCtx(currentLens)} in pharmaceutical distribution. For each result, write a detailed summary explaining what happened, who is involved, specific numbers or dates, and why it matters to the industry. Last 90 days. Include article URLs.`);
     try {
       const obj = JSON.parse(t.replace(/```json|```/g, "").trim().match(/\{[\s\S]*\}/)?.[0] || "{}");
       if (obj.topline && obj.items?.length) return { topline: obj.topline, items: obj.items };
@@ -359,8 +359,8 @@ export default function PharmIntel() {
         if (i > 0) await wait(12000);
         const v = VOICES_LIST[i];
         try {
-          const t = await api(SYS + `\nJSON array 1-2 by ${v.name}${ab}: "quote","context","url","date". If none, []. Only JSON.`,
-            `Statements by ${v.name} about ${sa}. Last 90 days.`);
+          const t = await api(SYS + `\nReturn a JSON array of 1-2 recent public statements by ${v.name} (${v.title})${ab}. Each object: "quote"(the actual statement, 1-2 sentences),"context"(where and when they said it),"url"(article URL),"date"(YYYY-MM-DD). If no statements found, return []. Only valid JSON.`,
+            `Find recent public statements, quotes, or comments by ${v.name} about ${sa}. Look for earnings calls, interviews, conference speeches, press releases. Last 90 days.`);
           const stmts = pj(t);
           if (stmts.length) {
             const entry = { ...v, stmts };
@@ -392,7 +392,8 @@ export default function PharmIntel() {
     setLoading(true); setErr(null); setIntel([]); setTopline(""); setShowAll(false); setFmt("news");
     const iv = sL("news");
     try {
-      const t = await api(SYS + `\nJSON: {"topline":"1 sentence","items":[4: ${SCH}]}. Only JSON.`, `News: ${query}. Last 90 days. URLs.`);
+      const t = await api(SYS + `\nReturn JSON: {"topline":"1 factual sentence","items":[4 items, each with: ${SCH}]}. Each summary MUST be 3-4 sentences. Only valid JSON.`,
+        `Search for recent developments about ${query} in pharmaceutical distribution. For each result, write a detailed summary with specific facts. Last 90 days. Include URLs.`);
       try {
         const obj = JSON.parse(t.replace(/```json|```/g, "").trim().match(/\{[\s\S]*\}/)?.[0] || "{}");
         if (obj.topline && obj.items?.length) { setTopline(obj.topline); setIntel(obj.items); setAllIntel(prev => [...prev, ...dd(prev, obj.items)]); logJ("search", query, obj.topline, obj.items); clearInterval(iv); setLoading(false); return; }
