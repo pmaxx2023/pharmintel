@@ -43,11 +43,22 @@ export default async function handler(req, res) {
         return m ? m[1].trim() : '';
       };
 
-      const title = getField('title').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"');
-      const link = getField('link') || getField('guid');
+      const title = getField('title').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/ - [^-]+$/, ''); // strip " - Source Name" suffix
+      let link = getField('link') || getField('guid');
       const pubDate = getField('pubDate');
       const srcName = getField('source') || (source === 'bing' ? 'Bing News' : 'Google News');
-      const desc = getField('description').replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').trim().slice(0, 300);
+      
+      // Google News descriptions contain HTML entities - decode them first, then strip
+      let rawDesc = getField('description');
+      // Decode HTML entities
+      rawDesc = rawDesc.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"');
+      
+      // Try to extract the real article URL from the description (Google News embeds it)
+      const realUrlMatch = rawDesc.match(/href="(https?:\/\/(?!news\.google\.com)[^"]+)"/);
+      if (realUrlMatch) link = realUrlMatch[1];
+      
+      // Now strip all HTML tags and clean up
+      const desc = rawDesc.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
 
       // Format date
       let date = '';

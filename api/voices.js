@@ -43,11 +43,15 @@ export default async function handler(req, res) {
         return m ? m[1].trim() : '';
       };
 
-      const itemTitle = getField('title').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"');
-      const link = getField('link') || getField('guid');
+      const itemTitle = getField('title').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/ - [^-]+$/, '');
+      let link = getField('link') || getField('guid');
       const pubDate = getField('pubDate');
       const source = getField('source') || 'News';
-      const desc = getField('description').replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').trim();
+      let rawDesc = getField('description');
+      rawDesc = rawDesc.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"');
+      const realUrlMatch = rawDesc.match(/href="(https?:\/\/(?!news\.google\.com)[^"]+)"/);
+      if (realUrlMatch) link = realUrlMatch[1];
+      const desc = rawDesc.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 
       let date = '';
       if (pubDate) {
