@@ -1,14 +1,35 @@
-// Fetches news from Google News RSS - free, no auth, no rate limits
+// Fetches news from Google News RSS with Bing fallback - no API key needed
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST only' });
 
   const { query, limit = 6 } = req.body;
   if (!query) return res.status(400).json({ error: 'Missing query' });
 
+  const headers = { 'User-Agent': 'Mozilla/5.0 (compatible; PharmIntel/1.0)' };
+
   try {
-    const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query + ' pharmacy OR pharmaceutical OR distribution')}&hl=en-US&gl=US&ceid=US:en`;
-    const response = await fetch(url);
-    const xml = await response.text();
+    // Try Google News RSS first
+    let xml = '';
+    let source = 'google';
+    try {
+      const gUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`;
+      const gRes = await fetch(gUrl, { headers });
+      if (gRes.ok) xml = await gRes.text();
+    } catch {}
+
+    // Fallback to Bing News RSS
+    if (!xml || !xml.includes('<item>')) {
+      source = 'bing';
+      try {
+        const bUrl = `https://www.bing.com/news/search?q=${encodeURIComponent(query)}&format=rss`;
+        const bRes = await fetch(bUrl, { headers });
+        if (bRes.ok) xml = await bRes.text();
+      } catch {}
+    }
+
+    if (!xml || !xml.includes('<item>')) {
+      return res.status(200).json({ topline: '', items: [], debug: 'No RSS results from Google or Bing' });
+    }
 
     // Parse RSS XML
     const items = [];
@@ -16,32 +37,36 @@ export default async function handler(req, res) {
     let match;
     while ((match = itemRegex.exec(xml)) !== null && items.length < limit) {
       const block = match[1];
-      const title = (block.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/) || block.match(/<title>(.*?)<\/title>/) || [])[1] || '';
-      const link = (block.match(/<link>(.*?)<\/link>/) || [])[1] || '';
-      const pubDate = (block.match(/<pubDate>(.*?)<\/pubDate>/) || [])[1] || '';
-      const source = (block.match(/<source[^>]*>(.*?)<\/source>/) || block.match(/<source[^>]*><!\[CDATA\[(.*?)\]\]><\/source>/) || [])[1] || '';
-      const desc = (block.match(/<description><!\[CDATA\[(.*?)\]\]><\/description>/) || block.match(/<description>(.*?)<\/description>/) || [])[1] || '';
+      const getField = (tag) => {
+        const m = block.match(new RegExp(`<${tag}[^>]*><!\\[CDATA\\[([\\s\\S]*?)\\]\\]><\\/${tag}>`)) ||
+                  block.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)<\\/${tag}>`));
+        return m ? m[1].trim() : '';
+      };
 
-      // Clean HTML from description
-      const summary = desc.replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&#39;/g, "'").replace(/&quot;/g, '"').trim().slice(0, 300);
+      const title = getField('title').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"');
+      const link = getField('link') || getField('guid');
+      const pubDate = getField('pubDate');
+      const srcName = getField('source') || (source === 'bing' ? 'Bing News' : 'Google News');
+      const desc = getField('description').replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').trim().slice(0, 300);
 
       // Format date
       let date = '';
       if (pubDate) {
         try {
           const d = new Date(pubDate);
-          date = d.toISOString().slice(0, 10);
+          if (!isNaN(d.getTime())) {
+            date = d.toISOString().slice(0, 10);
+            // Skip if older than 90 days
+            const age = (Date.now() - d.getTime()) / (1000 * 60 * 60 * 24);
+            if (age > 90) continue;
+          }
         } catch {}
       }
 
-      // Skip if older than 90 days
-      if (date) {
-        const age = (Date.now() - new Date(date).getTime()) / (1000 * 60 * 60 * 24);
-        if (age > 90) continue;
-      }
+      if (!title) continue;
 
       // Guess sourceId
-      const srcLower = (source + ' ' + title).toLowerCase();
+      const srcLower = (srcName + ' ' + title).toLowerCase();
       let sourceId = 'general';
       if (srcLower.includes('drug channel')) sourceId = 'drugchannels';
       else if (srcLower.includes('drug store news')) sourceId = 'drugstorenews';
@@ -51,29 +76,19 @@ export default async function handler(req, res) {
       else if (srcLower.includes('pharma commerce') || srcLower.includes('pharmaceutical commerce')) sourceId = 'pharmcommerce';
 
       // Guess tag
-      const combined = (title + ' ' + summary).toLowerCase();
+      const combined = (title + ' ' + desc).toLowerCase();
       let tag = 'MARKET';
-      if (combined.includes('regulation') || combined.includes('fda') || combined.includes('dea') || combined.includes('compliance') || combined.includes('dscsa')) tag = 'REGULATORY';
-      else if (combined.includes('cardinal') || combined.includes('cencora') || combined.includes('amerisource') || combined.includes('mckesson')) tag = 'COMPETITIVE';
-      else if (combined.includes('technology') || combined.includes('digital') || combined.includes('automation') || combined.includes('AI') || combined.includes('platform')) tag = 'TECHNOLOGY';
-      else if (combined.includes('revenue') || combined.includes('earnings') || combined.includes('profit') || combined.includes('pricing') || combined.includes('margin')) tag = 'FINANCIAL';
-      else if (combined.includes('patient') || combined.includes('pharmacy') || combined.includes('independent') || combined.includes('retail')) tag = 'CUSTOMER';
+      if (combined.match(/regulat|fda|dea|compliance|dscsa|legislation|law|rule/)) tag = 'REGULATORY';
+      else if (combined.match(/cardinal|cencora|amerisource|mckesson/)) tag = 'COMPETITIVE';
+      else if (combined.match(/technolog|digital|automat|ai |platform|software/)) tag = 'TECHNOLOGY';
+      else if (combined.match(/revenue|earning|profit|pricing|margin|financial|quarter/)) tag = 'FINANCIAL';
+      else if (combined.match(/patient|pharmacy|independent|retail|customer/)) tag = 'CUSTOMER';
 
-      items.push({
-        title: title.replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"'),
-        source: source || 'Google News',
-        sourceId,
-        summary,
-        url: link,
-        date,
-        tag,
-      });
+      items.push({ title, source: srcName, sourceId, summary: desc || title, url: link, date, tag });
     }
 
-    // Generate topline from first result
     const topline = items.length > 0 ? items[0].title : '';
-
-    return res.status(200).json({ topline, items });
+    return res.status(200).json({ topline, items, source });
   } catch (error) {
     return res.status(500).json({ error: error.message });
   }
