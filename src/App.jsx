@@ -136,7 +136,11 @@ const Progress = ({ msg }) => {
 
 const Lnk = ({ url }) => {
   if (!url) return null;
-  let h = "source"; try { h = new URL(url).hostname.replace("www.", ""); } catch {}
+  let h = "source";
+  try { 
+    const hostname = new URL(url).hostname.replace("www.", "");
+    h = hostname.includes("news.google.com") ? "read article" : hostname;
+  } catch {}
   return (<a href={url} target="_blank" rel="noopener noreferrer"
     style={{ fontSize: "11px", color: "var(--gold)", fontFamily: "var(--mono)", textDecoration: "none", opacity: 0.7, transition: "opacity 0.15s" }}
     onMouseEnter={e => e.currentTarget.style.opacity = "1"} onMouseLeave={e => e.currentTarget.style.opacity = "0.7"}

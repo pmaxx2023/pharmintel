@@ -43,22 +43,39 @@ export default async function handler(req, res) {
         return m ? m[1].trim() : '';
       };
 
-      const title = getField('title').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/ - [^-]+$/, ''); // strip " - Source Name" suffix
+      const title = getField('title').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/ - [^-]+$/, '');
       let link = getField('link') || getField('guid');
       const pubDate = getField('pubDate');
       const srcName = getField('source') || (source === 'bing' ? 'Bing News' : 'Google News');
       
-      // Google News descriptions contain HTML entities - decode them first, then strip
+      // Google News descriptions contain double-encoded HTML - decode fully
       let rawDesc = getField('description');
-      // Decode HTML entities
-      rawDesc = rawDesc.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"');
+      // Decode all HTML entities
+      rawDesc = rawDesc
+        .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+        .replace(/&#39;/g, "'").replace(/&quot;/g, '"')
+        .replace(/&nbsp;/g, ' ').replace(/&#160;/g, ' ')
+        .replace(/&rsquo;/g, "'").replace(/&lsquo;/g, "'")
+        .replace(/&rdquo;/g, '"').replace(/&ldquo;/g, '"')
+        .replace(/&mdash;/g, '—').replace(/&ndash;/g, '–')
+        .replace(/&#\d+;/g, ' ');
       
-      // Try to extract the real article URL from the description (Google News embeds it)
-      const realUrlMatch = rawDesc.match(/href="(https?:\/\/(?!news\.google\.com)[^"]+)"/);
-      if (realUrlMatch) link = realUrlMatch[1];
+      // Extract real article URLs from description - Google News uses <a href="...">
+      const allUrls = [...rawDesc.matchAll(/href="(https?:\/\/[^"]+)"/g)].map(m => m[1]);
+      const realUrl = allUrls.find(u => !u.includes('news.google.com') && !u.includes('support.google.com'));
+      if (realUrl) link = realUrl;
       
-      // Now strip all HTML tags and clean up
-      const desc = rawDesc.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
+      // Strip HTML, normalize whitespace
+      const cleanText = rawDesc.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+      
+      // Google News summaries often repeat the title - try to get just the unique part
+      let desc = cleanText;
+      if (desc.toLowerCase().startsWith(title.toLowerCase().slice(0, 30))) {
+        // Summary starts with title text - try to get content after source name
+        const afterSource = cleanText.replace(new RegExp(`^.*?${srcName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i'), '').trim();
+        desc = afterSource || cleanText;
+      }
+      desc = desc.slice(0, 300);
 
       // Format date
       let date = '';

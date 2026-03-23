@@ -48,9 +48,17 @@ export default async function handler(req, res) {
       const pubDate = getField('pubDate');
       const source = getField('source') || 'News';
       let rawDesc = getField('description');
-      rawDesc = rawDesc.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"');
-      const realUrlMatch = rawDesc.match(/href="(https?:\/\/(?!news\.google\.com)[^"]+)"/);
-      if (realUrlMatch) link = realUrlMatch[1];
+      rawDesc = rawDesc
+        .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+        .replace(/&#39;/g, "'").replace(/&quot;/g, '"')
+        .replace(/&nbsp;/g, ' ').replace(/&#160;/g, ' ')
+        .replace(/&rsquo;/g, "'").replace(/&lsquo;/g, "'")
+        .replace(/&rdquo;/g, '"').replace(/&ldquo;/g, '"')
+        .replace(/&mdash;/g, '—').replace(/&ndash;/g, '–')
+        .replace(/&#\d+;/g, ' ');
+      const allUrls = [...rawDesc.matchAll(/href="(https?:\/\/[^"]+)"/g)].map(m => m[1]);
+      const realUrl = allUrls.find(u => !u.includes('news.google.com') && !u.includes('support.google.com'));
+      if (realUrl) link = realUrl;
       const desc = rawDesc.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 
       let date = '';
