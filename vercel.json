@@ -3,5 +3,9 @@
     "api/chat.js": { "maxDuration": 60 },
     "api/news.js": { "maxDuration": 15 },
     "api/voices.js": { "maxDuration": 15 }
-  }
+  },
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/$1" },
+    { "source": "/(.*)", "destination": "/index.html" }
+  ]
 }

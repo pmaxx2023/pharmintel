@@ -311,14 +311,14 @@ export default function PharmIntel() {
     const iv = sL(ck);
     try {
       const result = await fetchNews(currentLens, limit);
-      if (result) {
+      if (result?.items?.length) {
         setTopline(result.topline); setIntel(result.items);
         setAllIntel(prev => [...prev, ...dd(prev, result.items)]);
         logJ(ck, lensLabel, result.topline, result.items);
         cacheSet(ck, lensLabel, { topline: result.topline, items: result.items });
         const now = new Date().toISOString(); setLastVisit(now); ST.set("lv", now);
-      } else if (!cached?.items?.length) setErr("No results found.");
-    } catch (e) { if (!cached?.items?.length) setErr(e.message); }
+      } else if (!cached?.items?.length) setErr(`No results. Source: ${result?.source || 'none'}. Debug: ${result?.debug || 'empty response'}`);
+    } catch (e) { if (!cached?.items?.length) setErr("Fetch error: " + e.message); }
     clearInterval(iv); setLoading(false); setRefreshing(false);
   }, []);
 
@@ -387,8 +387,8 @@ export default function PharmIntel() {
         setTopline(result.topline); setIntel(result.items);
         setAllIntel(prev => [...prev, ...dd(prev, result.items)]);
         logJ("search", query, result.topline, result.items);
-      } else setErr("No results found.");
-    } catch (e) { setErr(e.message); }
+      } else setErr(`No results. Source: ${result?.source || 'none'}. Debug: ${result?.debug || 'empty'}`);
+    } catch (e) { setErr("Fetch error: " + e.message); }
     clearInterval(iv); setLoading(false);
   }, []);
 
