@@ -90,22 +90,26 @@ function dd(ex, items) { const r = []; for (const i of items) if (!ex.some(e => 
 
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
-// ── RSS-based fetch (no AI, no rate limits, no API key) ──
-async function fetchNewsAPI(query, limit) {
-  const res = await fetch("/api/news", { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, limit: limit || 6 }) });
-  const d = await res.json();
-  if (d.error) throw new Error(d.error);
-  return d; // { topline, items }
+// ── AI API (Haiku for speed + rate limits) ──
+async function api(sys, msg) {
+  const maxRetries = 2;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ system: sys, message: msg }) });
+    const d = await res.json();
+    if (d.status === 429 || (d.error && d.error.includes("rate limit"))) {
+      if (attempt < maxRetries) { await wait(30000); continue; }
+    }
+    if (d.error) throw new Error(d.error);
+    return (d.text || "").replace(/<\/?antml:[^>]*>/g, "").replace(/<\/?cite[^>]*>/g, "").replace(/\[?\d+-\d+(?::\d+)?(?:,\d+-\d+(?::\d+)?)*\]?/g, "");
+  }
+  throw new Error("Rate limited. Wait a minute and try again.");
 }
+function pj(t) { try { const c = t.replace(/```json|```/g, "").trim(); const m = c.match(/\[[\s\S]*\]/); return m ? JSON.parse(m[0]) : JSON.parse(c); } catch { return []; } }
 
-async function fetchVoiceAPI(name, title, topic) {
-  const res = await fetch("/api/voices", { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, title, topic }) });
-  const d = await res.json();
-  if (d.error) throw new Error(d.error);
-  return d; // { stmts }
-}
+const SYS = `Pharma distribution news. Facts only, cite sources. Today: ${new Date().toLocaleDateString("en-US",{month:"long",day:"numeric",year:"numeric"})}. Last 90 days only.`;
+const SCH = `"title","source","sourceId"(drugchannels|drugstorenews|pharmacytimes|pharmcommerce|chaindrugreview|rxinsider|general),"summary"(2-3 sentences),"url","date"(YYYY-MM-DD),"tag"(COMPETITIVE|REGULATORY|MARKET|CUSTOMER|TECHNOLOGY|FINANCIAL)`;
+const lensCtx = l => l ? `"${l.label}"` : "pharma distribution";
 
 const fmtDate = (d) => {
   if (!d || d.trim() === "") return null;
@@ -117,9 +121,6 @@ const fmtDate = (d) => {
   } catch { return null; }
 };
 const ago = (iso) => { if (!iso) return null; const d = Math.floor((Date.now() - new Date(iso).getTime()) / 60000); if (d < 60) return `${d}m`; if (d < 1440) return `${Math.floor(d/60)}h`; return `${Math.floor(d/1440)}d`; };
-
-// Build search query from lens
-const lensQuery = l => l ? l.q || l.label : "pharmaceutical distribution wholesale pharmacy";
 
 // ── Components ──
 const Progress = ({ msg }) => {
@@ -149,34 +150,10 @@ const Lnk = ({ url }) => {
 
 const Card = ({ item, onSave, saved, read, onRead, isNew }) => {
   const [open, setOpen] = useState(false);
-  const [fullText, setFullText] = useState(null);
-  const [resolvedUrl, setResolvedUrl] = useState(null);
-  const [fetching, setFetching] = useState(false);
   const src = SOURCES.find(s => s.id === item.sourceId) || SOURCES[6];
-  
-  const handleClick = async () => {
-    const willOpen = !open;
-    setOpen(willOpen);
-    if (!read && onRead) onRead(item.title);
-    // Fetch article content on first expand
-    if (willOpen && fullText === null && item.url) {
-      setFetching(true);
-      try {
-        const res = await fetch("/api/extract", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ url: item.url }) });
-        const d = await res.json();
-        setFullText(d.text || "");
-        if (d.url && d.url !== item.url) setResolvedUrl(d.url);
-      } catch { setFullText(""); }
-      setFetching(false);
-    }
-  };
-  
-  const summary = fullText || item.summary;
-  const linkUrl = resolvedUrl || item.url;
-  
   return (
     <article style={{ paddingBottom: "24px", marginBottom: "24px", borderBottom: "1px solid var(--border)", opacity: read && !open ? 0.5 : 1, transition: "opacity 0.2s", cursor: "pointer" }}
-      onClick={handleClick}
+      onClick={() => { setOpen(!open); if (!read && onRead) onRead(item.title); }}
       onMouseEnter={e => e.currentTarget.style.opacity = "1"} onMouseLeave={e => { if (read && !open) e.currentTarget.style.opacity = "0.5"; }}>
       <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
         {item.date && fmtDate(item.date) && <span style={{ fontSize: "10px", fontFamily: "var(--mono)", color: "var(--t3)", textTransform: "uppercase", letterSpacing: "0.12em" }}>{fmtDate(item.date)}</span>}
@@ -188,9 +165,8 @@ const Card = ({ item, onSave, saved, read, onRead, isNew }) => {
       </div>
       <h3 style={{ fontSize: "17px", fontWeight: 600, color: "var(--t1)", lineHeight: 1.4, marginBottom: open ? "10px" : 0, fontFamily: "var(--body)" }}>{item.title}</h3>
       {open && (<div style={{ animation: "fadeIn 0.2s ease" }}>
-        {fetching && <p style={{ fontSize: "12px", color: "var(--t4)", fontFamily: "var(--mono)", marginBottom: "8px" }}>Loading article...</p>}
-        <p style={{ fontSize: "14px", color: "var(--t2)", lineHeight: 1.7, marginBottom: "8px" }}>{summary}</p>
-        <Lnk url={linkUrl} />
+        <p style={{ fontSize: "14px", color: "var(--t2)", lineHeight: 1.7, marginBottom: "8px" }}>{item.summary}</p>
+        <Lnk url={item.url} />
       </div>)}
     </article>
   );
@@ -314,11 +290,17 @@ export default function PharmIntel() {
   const clearJournal = () => { setJournal([]); ST.set("jl", []); };
 
   // ── Run: News (cache-first) ──
-  // ── Fetch News (RSS-based, no AI) ──
+  // ── Fetch News (AI with web search) ──
   const fetchNews = useCallback(async (currentLens, limit) => {
-    const query = lensQuery(currentLens);
-    const result = await fetchNewsAPI(query, limit || 6);
-    return result?.items?.length ? result : null;
+    const count = limit || 4;
+    const t = await api(SYS + `\nJSON: {"topline":"1 factual sentence","items":[${count}: ${SCH}]}. Only JSON.`,
+      `${limit ? "Top " + limit : "News"} ${lensCtx(currentLens)}. Last 90 days. URLs.`);
+    try {
+      const obj = JSON.parse(t.replace(/```json|```/g, "").trim().match(/\{[\s\S]*\}/)?.[0] || "{}");
+      if (obj.topline && obj.items?.length) return { topline: obj.topline, items: obj.items };
+    } catch {}
+    const p = pj(t);
+    return p.length ? { topline: p[0]?.title || "", items: p } : null;
   }, []);
 
   const runNews = useCallback(async (currentLens, limit) => {
@@ -336,7 +318,7 @@ export default function PharmIntel() {
       setIntel([]); setTopline(""); setLoading(true);
     }
 
-    // 2. Fetch from RSS
+    // 2. Fetch
     const iv = sL(ck);
     try {
       const result = await fetchNews(currentLens, limit);
@@ -346,29 +328,12 @@ export default function PharmIntel() {
         logJ(ck, lensLabel, result.topline, result.items);
         cacheSet(ck, lensLabel, { topline: result.topline, items: result.items });
         const now = new Date().toISOString(); setLastVisit(now); ST.set("lv", now);
-      } else if (!cached?.items?.length) setErr(`No results. Source: ${result?.source || 'none'}. Debug: ${result?.debug || 'empty response'}`);
-    } catch (e) { if (!cached?.items?.length) setErr("Fetch error: " + e.message); }
+      } else if (!cached?.items?.length) setErr("No results found.");
+    } catch (e) { if (!cached?.items?.length) setErr(e.message); }
     clearInterval(iv); setLoading(false); setRefreshing(false);
   }, []);
 
-  // ── Fetch Voices (RSS-based, no AI) ──
-  const fetchVoicesAll = useCallback(async (currentLens) => {
-    const topic = currentLens?.label || "";
-    const collected = [];
-    // Parallel — no rate limits with RSS
-    const results = await Promise.allSettled(
-      VOICES_LIST.map(async v => {
-        const d = await fetchVoiceAPI(v.name, v.title, topic);
-        return { voice: v, stmts: d.stmts || [] };
-      })
-    );
-    for (const r of results) {
-      if (r.status === "fulfilled" && r.value.stmts.length)
-        collected.push({ ...r.value.voice, stmts: r.value.stmts });
-    }
-    return collected;
-  }, []);
-
+  // ── Fetch Voices (AI, sequential to respect rate limits) ──
   const runVoices = useCallback(async (currentLens) => {
     setFmt("voices"); setErr(null); setVExp(new Set());
     const lensLabel = currentLens?.label || null;
@@ -383,12 +348,28 @@ export default function PharmIntel() {
       setVoices([]); setLoading(true);
     }
 
-    // 2. Fetch from RSS — all 10 in parallel (no rate limits!)
+    // 2. Fetch — one at a time with delays
     const iv = sL("voices");
+    const topic = currentLens?.label || "";
+    const ab = topic ? ` about "${topic}"` : "";
+    const sa = topic || "pharmaceutical distribution";
+    const collected = [];
     try {
-      const collected = await fetchVoicesAll(currentLens);
+      for (let i = 0; i < Math.min(5, VOICES_LIST.length); i++) {
+        if (i > 0) await wait(12000);
+        const v = VOICES_LIST[i];
+        try {
+          const t = await api(SYS + `\nJSON array 1-2 by ${v.name}${ab}: "quote","context","url","date". If none, []. Only JSON.`,
+            `Statements by ${v.name} about ${sa}. Last 90 days.`);
+          const stmts = pj(t);
+          if (stmts.length) {
+            const entry = { ...v, stmts };
+            collected.push(entry);
+            setVoices(prev => [...prev, entry]);
+          }
+        } catch {}
+      }
       if (collected.length) {
-        setVoices(collected);
         logJ("voices", lensLabel, null, collected.map(v => ({ title: v.stmts[0]?.quote || "", source: v.name, url: v.stmts[0]?.url || "" })));
         cacheSet("voices", lensLabel, { voices: collected });
       } else if (!cached?.voices?.length) setVoices([]);
@@ -411,13 +392,13 @@ export default function PharmIntel() {
     setLoading(true); setErr(null); setIntel([]); setTopline(""); setShowAll(false); setFmt("news");
     const iv = sL("news");
     try {
-      const result = await fetchNewsAPI(query, 6);
-      if (result?.items?.length) {
-        setTopline(result.topline); setIntel(result.items);
-        setAllIntel(prev => [...prev, ...dd(prev, result.items)]);
-        logJ("search", query, result.topline, result.items);
-      } else setErr(`No results. Source: ${result?.source || 'none'}. Debug: ${result?.debug || 'empty'}`);
-    } catch (e) { setErr("Fetch error: " + e.message); }
+      const t = await api(SYS + `\nJSON: {"topline":"1 sentence","items":[4: ${SCH}]}. Only JSON.`, `News: ${query}. Last 90 days. URLs.`);
+      try {
+        const obj = JSON.parse(t.replace(/```json|```/g, "").trim().match(/\{[\s\S]*\}/)?.[0] || "{}");
+        if (obj.topline && obj.items?.length) { setTopline(obj.topline); setIntel(obj.items); setAllIntel(prev => [...prev, ...dd(prev, obj.items)]); logJ("search", query, obj.topline, obj.items); clearInterval(iv); setLoading(false); return; }
+      } catch {}
+      const p = pj(t); if (p.length) { setIntel(p); setAllIntel(prev => [...prev, ...dd(prev, p)]); logJ("search", query, null, p); } else setErr("No results.");
+    } catch (e) { setErr(e.message); }
     clearInterval(iv); setLoading(false);
   }, []);
 
@@ -428,7 +409,6 @@ export default function PharmIntel() {
     if (f === "voices") { setVoices([]); setVExp(new Set()); }
   };
 
-  // ── Topic Index: one API call indexes all topics ──
   /* buildIndex and prewarm removed — re-add when rate limit upgraded */
 
   const vis = showAll ? intel : intel.slice(0, 3);

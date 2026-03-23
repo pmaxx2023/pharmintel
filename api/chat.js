@@ -22,7 +22,7 @@ export default async function handler(req, res) {
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: req.body.model || 'claude-sonnet-4-20250514',
+        model: req.body.model || 'claude-haiku-4-5-20251001',
         max_tokens: req.body.max_tokens || 4000,
         system,
         tools: [{ type: 'web_search_20250305', name: 'web_search' }],
