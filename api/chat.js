@@ -36,9 +36,9 @@ function sameOrigin(req) {
 }
 
 function passcodeOk(req) {
-  const expected = process.env.PHARMINTEL_PASSCODE;
+  const expected = process.env.APP_PASSCODE;
   if (!expected) return false;
-  const given = req.headers['x-pharmintel-passcode'];
+  const given = req.headers['x-app-passcode'];
   if (typeof given !== 'string') return false;
   const a = Buffer.from(given);
   const b = Buffer.from(expected);

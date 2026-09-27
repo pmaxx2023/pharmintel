@@ -106,7 +106,7 @@ async function api(sys, msg) {
   const maxRetries = 2;
   let passcode = getPasscode(false);
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json", "X-PharmIntel-Passcode": passcode },
+    const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json", "X-App-Passcode": passcode },
       body: JSON.stringify({ system: sys, message: msg }) });
     if (res.status === 401) {
       if (attempt < maxRetries) { passcode = getPasscode(true); continue; }
