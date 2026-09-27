@@ -91,11 +91,27 @@ function dd(ex, items) { const r = []; for (const i of items) if (!ex.some(e => 
 const wait = ms => new Promise(r => setTimeout(r, ms));
 
 // ── AI API (Haiku for speed + rate limits) ──
+const PASS_KEY = "pi:passcode";
+function getPasscode(reset) {
+  let code = null;
+  try { code = reset ? null : localStorage.getItem(PASS_KEY); } catch {}
+  if (!code) {
+    code = window.prompt("Enter the PharmIntel passcode") || "";
+    try { localStorage.setItem(PASS_KEY, code); } catch {}
+  }
+  return code;
+}
+
 async function api(sys, msg) {
   const maxRetries = 2;
+  let passcode = getPasscode(false);
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" },
+    const res = await fetch("/api/chat", { method: "POST", headers: { "Content-Type": "application/json", "X-PharmIntel-Passcode": passcode },
       body: JSON.stringify({ system: sys, message: msg }) });
+    if (res.status === 401) {
+      if (attempt < maxRetries) { passcode = getPasscode(true); continue; }
+      throw new Error("Wrong passcode.");
+    }
     const d = await res.json();
     if (d.status === 429 || (d.error && d.error.includes("rate limit"))) {
       if (attempt < maxRetries) { await wait(30000); continue; }
